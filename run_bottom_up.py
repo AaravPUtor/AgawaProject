@@ -13,12 +13,11 @@ def main():
     parser.add_argument("--return-unit", choices=("percent", "decimal"), required=True,
                         help="percent: 1 means 1%%; decimal: 0.01 means 1%%")
     parser.add_argument("--output-dir", type=Path, required=True,
-                        help="New local directory for confidential Bottom-Up outputs")
+                        help="Local directory for confidential Bottom-Up outputs")
     parser.add_argument("--window", type=int, default=252)
     parser.add_argument("--min-obs", type=int, default=252)
     args = parser.parse_args()
-    if args.output_dir.exists():
-        parser.error("Output directory must be new; existing files will not be overwritten.")
+   
     df = pd.read_csv(args.input)
     df.columns = df.columns.str.strip().str.strip("'")
     if not df.columns.is_unique or set(["Index", *RETURN_COLS]) - set(df.columns):
@@ -40,7 +39,7 @@ def main():
     returns, weights = run_bottom_up(df, args.window, args.min_obs)
     if weights.empty:
         parser.error("No eligible rebalance dates; provide more complete historical data.")
-    args.output_dir.mkdir(parents=True, exist_ok=False)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     returns.to_csv(args.output_dir / "BottomUp_Level5_Returns.csv", index=False)
     weights.to_csv(args.output_dir / "BottomUp_Quarterly_Instrument_Weights.csv", index=False)
     print("Bottom-Up complete. Confidential results saved locally; no allocations printed.")
