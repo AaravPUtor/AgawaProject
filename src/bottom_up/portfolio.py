@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 if __package__:  # Support package and src-on-path imports.
-    from .risk_budget import optimize_risk_budget
+    from ..risk_budget import optimize_risk_budget
 else:
     from risk_budget import optimize_risk_budget
 
