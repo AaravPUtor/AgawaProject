@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from src import bottom_up as bu
+from src.bottom_up import portfolio as bu
 
 
 def sample(n=120):
