@@ -10,7 +10,7 @@ import pandas as pd
 
 from settings import DATA_FILE, OUTPUT_DIR, START_DATE, END_DATE, COVARIANCE_WINDOW, MIN_OBSERVATIONS
 from .portfolio import run_top_down
-from performance import build_performance_summary
+from src.performance import build_performance_summary
 from risk_budget import clean_returns
 
 
