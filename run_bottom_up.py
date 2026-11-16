@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.bottom_up import RETURN_COLS, PORTFOLIO, run_bottom_up
-
+from src.performance import build_performance_summary
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -40,8 +40,26 @@ def main():
     if weights.empty:
         parser.error("No eligible rebalance dates; provide more complete historical data.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    returns.to_csv(args.output_dir / "BottomUp_Level5_Returns.csv", index=False)
-    weights.to_csv(args.output_dir / "BottomUp_Quarterly_Instrument_Weights.csv", index=False)
+    # Save portfolio returns and weights
+    returns.to_csv(
+        args.output_dir / "BottomUp_Level5_Returns.csv",
+        index=False
+    )
+    
+    weights.to_csv(
+        args.output_dir / "BottomUp_Quarterly_Instrument_Weights.csv",
+        index=False
+    )
+    
+    # Generate performance summary
+    portfolio_returns = returns.set_index("Index")["Bottom_Up_Total_Portfolio"]
+    
+    performance_summary = build_performance_summary(portfolio_returns)
+    
+    performance_summary.to_csv(
+        args.output_dir / "BottomUp_Performance_Summary.csv"
+    )
+    
     print("Bottom-Up complete. Confidential results saved locally; no allocations printed.")
 
 
