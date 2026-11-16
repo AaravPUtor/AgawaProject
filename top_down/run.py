@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "config"))
 import pandas as pd
 
 from settings import DATA_FILE, OUTPUT_DIR, START_DATE, END_DATE, COVARIANCE_WINDOW, MIN_OBSERVATIONS
-from portfolio import run_top_down
+from .portfolio import run_top_down
 from performance import build_performance_summary
 from risk_budget import clean_returns
 
@@ -27,7 +27,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     df = load_returns(DATA_FILE)
 
-    from portfolio import return_cols
+    from .portfolio import return_cols
     missing = [c for c in return_cols if c not in df.columns]
     if missing:
         raise KeyError(f"Required columns are missing: {missing}")
