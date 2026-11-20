@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 
@@ -25,43 +26,140 @@ level_2_map = {
     "Global_Bonds": ["US10Y", "BUND", "JGB", "CA10Y", "CHN10Y", "LongGilt"],
 }
 environment_map = {
-    "Rising_Growth":     {"assets": ["Global_Equity", "Global_Commodities"],      "target_risk": [0.55, 0.45]},
-    "Falling_Growth":    {"assets": ["Global_Bonds", "Global_ILB_Portfolio"],     "target_risk": [0.50, 0.50]},
-    "Rising_Inflation":  {"assets": ["Global_Commodities", "Global_ILB_Portfolio"], "target_risk": [0.50, 0.50]},
-    "Falling_Inflation": {"assets": ["Global_Equity", "Global_Bonds"],            "target_risk": [0.50, 0.50]},
+    "Rising_Growth": {
+        "assets": ["Global_Equity", "Global_Commodities"],
+        "target_risk": [0.55, 0.45]
+    },
+    "Falling_Growth": {
+        "assets": ["Global_Bonds", "Global_ILB_Portfolio"],
+        "target_risk": [0.50, 0.50]
+    },
+    "Rising_Inflation": {
+        "assets": ["Global_Commodities", "Global_ILB_Portfolio"],
+        "target_risk": [0.50, 0.50]
+    },
+    "Falling_Inflation": {
+        "assets": ["Global_Equity", "Global_Bonds"],
+        "target_risk": [0.50, 0.50]
+    },
 }
 
 
+def solve_topdown_in_window(
+    window,
+    *,
+    return_covariance_diagnostics=False
+):
+    """Solve the Top-Down hierarchy inside one complete estimation window.
 
+    Returns flattened capital weights on the raw instruments.
 
-def solve_topdown_in_window(window):
-    """Solve Levels 1-4 inside ONE estimation window of raw daily returns.
-    Returns the flattened capital weights on the raw instruments."""
+    When return_covariance_diagnostics=True, also returns the exact covariance
+    matrices and optimizer results for every optimization node.
+    """
     node_returns = {col: window[col] for col in return_cols}
     node_exposure = {}
+
     for col in return_cols:
         e = pd.Series(0.0, index=return_cols)
         e[col] = 1.0
         node_exposure[col] = e
 
-    def build(name, children, target_risk=None):
-        result = optimize_risk_budget(
-            pd.DataFrame({c: node_returns[c] for c in children}),
-            target_risk=target_risk
-        )
-        w = result.set_index("Asset")["Capital Weight"].reindex(children)
-        node_returns[name]  = sum(node_returns[c]  * w[c] for c in children)
-        node_exposure[name] = sum(node_exposure[c] * w[c] for c in children)
+    covariance_diagnostics = []
 
-    for proxy_name, bond_col in bond_map.items():          # Level 1: ILB proxies
-        build(proxy_name, ["Gold", bond_col], [0.50, 0.50])
-    build("Global_ILB_Portfolio", list(geography_map.values()), [1 / 6] * 6)
+    def build(name, children, target_risk=None, level=None):
+        if return_covariance_diagnostics:
+            result, cov_info = optimize_risk_budget(
+                pd.DataFrame({c: node_returns[c] for c in children}),
+                target_risk=target_risk,
+                return_diagnostics=True
+            )
+
+            covariance_diagnostics.append({
+                "Node": name,
+                "Level": level,
+                "Assets": children.copy(),
+                "Weights": result.copy(),
+                "Raw Covariance": cov_info["raw_covariance"],
+                "Normalized Covariance": cov_info["normalized_covariance"],
+                "Covariance Scale": cov_info["covariance_scale"],
+                "Observations": cov_info["observations"],
+                "Objective Value": cov_info["objective_value"],
+                "Iterations": cov_info["iterations"],
+            })
+
+        else:
+            result = optimize_risk_budget(
+                pd.DataFrame({c: node_returns[c] for c in children}),
+                target_risk=target_risk
+            )
+
+        w = result.set_index("Asset")["Capital Weight"].reindex(children)
+
+        if (
+            not np.isfinite(w).all()
+            or (w < 0).any()
+            or not np.isclose(w.sum(), 1.0, atol=1e-7)
+        ):
+            raise ValueError(f"Invalid optimizer weights at {name}.")
+
+        node_returns[name] = sum(
+            node_returns[c] * w[c] for c in children
+        )
+        node_exposure[name] = sum(
+            node_exposure[c] * w[c] for c in children
+        )
+
+    # Level 1: Six regional ILB proxies
+    for proxy_name, bond_col in bond_map.items():
+        build(
+            proxy_name,
+            ["Gold", bond_col],
+            [0.50, 0.50],
+            level=1
+        )
+
+    # Level 2: Global ILB portfolio
+    build(
+        "Global_ILB_Portfolio",
+        list(geography_map.values()),
+        [1 / 6] * 6,
+        level=2
+    )
+
+    # Level 2: Global asset-class portfolios
     for name, cols in level_2_map.items():
-        build(name, cols, [1 / len(cols)] * len(cols))
-    for name, s in environment_map.items():                # Level 3: environments
-        build(name, s["assets"], s["target_risk"])
-    build("Top_Down_Total_Portfolio", list(environment_map.keys()), [0.25] * 4)   # Level 4
-    return node_exposure["Top_Down_Total_Portfolio"]
+        build(
+            name,
+            cols,
+            [1 / len(cols)] * len(cols),
+            level=2
+        )
+
+    # Level 3: Four global economic environments
+    for name, s in environment_map.items():
+        build(
+            name,
+            s["assets"],
+            s["target_risk"],
+            level=3
+        )
+
+    # Level 4: Global portfolio
+    build(
+        "Top_Down_Total_Portfolio",
+        list(environment_map.keys()),
+        [0.25] * 4,
+        level=4
+    )
+
+    exposure = node_exposure["Top_Down_Total_Portfolio"].copy()
+
+    if return_covariance_diagnostics:
+        return exposure, covariance_diagnostics
+
+    return exposure
+
 
 def run_topdown_in_window(df, covariance_window=252, min_obs=252):
     data = df[["Index"] + return_cols].sort_values("Index").reset_index(drop=True)
@@ -73,19 +171,26 @@ def run_topdown_in_window(df, covariance_window=252, min_obs=252):
         mask = data["Quarter"] == q
         q_start = data.loc[mask, "Index"].min()
 
-        # only data strictly before the quarter starts, all 17 series available
-        hist = (data.loc[data["Index"] < q_start, return_cols]
-                .dropna().tail(covariance_window))
+        # Only data strictly before the quarter starts, all 17 series available.
+        hist = (
+            data.loc[data["Index"] < q_start, return_cols]
+            .dropna()
+            .tail(covariance_window)
+        )
+
         if len(hist) < min_obs:
-            continue                                # still warming up (one window only)
+            continue
 
         exposure = solve_topdown_in_window(hist)
-        port[mask] = (data.loc[mask, return_cols].fillna(0)
-                      .mul(exposure, axis=1).sum(axis=1))
-        hist_dates = data.loc[
-            hist.index,
-            "Index"
-        ]
+
+        port[mask] = (
+            data.loc[mask, return_cols]
+            .fillna(0)
+            .mul(exposure, axis=1)
+            .sum(axis=1)
+        )
+
+        hist_dates = data.loc[hist.index, "Index"]
 
         weight_rows.append({
             "Quarter": str(q),
@@ -96,8 +201,15 @@ def run_topdown_in_window(df, covariance_window=252, min_obs=252):
             "Gross Exposure": exposure.abs().sum(),
             **exposure.to_dict()
         })
-    out = pd.DataFrame({"Index": data["Index"], "Top_Down_Total_Portfolio": port})
+
+    out = pd.DataFrame({
+        "Index": data["Index"],
+        "Top_Down_Total_Portfolio": port
+    })
+
     return out, pd.DataFrame(weight_rows)
+
+
 def run_top_down(df, covariance_window=252, min_obs=252):
     return run_topdown_in_window(
         df,
