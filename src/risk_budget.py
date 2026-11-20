@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -17,7 +18,6 @@ def clean_returns(series):
 
 
 # RISK CONTRIBUTIONS
-# using covariance matrices now - taking cov_matrix in now
 
 def risk_contributions(weights, cov_matrix):
 
@@ -60,7 +60,8 @@ def optimize_risk_budget(
     asset_returns,
     target_risk=None,
     bounds=None,
-    maxiter=5000
+    maxiter=5000,
+    return_diagnostics=False
 ):
     asset_returns = (
         asset_returns
@@ -78,19 +79,21 @@ def optimize_risk_budget(
     if len(asset_returns) < 2:
         raise ValueError("Insufficient complete return observations.")
 
-    cov = asset_returns.cov().to_numpy(dtype=float)
-    cov = (cov + cov.T) / 2
+    # Calculate and preserve the original covariance matrix.
+    raw_cov = asset_returns.cov().to_numpy(dtype=float)
+    raw_cov = (raw_cov + raw_cov.T) / 2
 
-    if not np.isfinite(cov).all():
+    if not np.isfinite(raw_cov).all():
         raise ValueError("Covariance matrix contains invalid values.")
 
-    if np.any(np.diag(cov) <= 1e-14):
+    if np.any(np.diag(raw_cov) <= 1e-14):
         raise ValueError(
             "At least one asset has zero or near-zero variance."
         )
 
-    scale = np.max(np.diag(cov))
-    cov = cov / scale
+    # Normalize covariance matrix for optimization.
+    scale = float(np.max(np.diag(raw_cov)))
+    cov = raw_cov / scale
 
     if target_risk is None:
         target_rc = np.ones(n_assets) / n_assets
@@ -186,12 +189,37 @@ def optimize_risk_budget(
         weights * marginal_risk / portfolio_variance
     )
 
-    return pd.DataFrame({
+    # Original optimization results.
+    result_df = pd.DataFrame({
         "Asset": asset_cols,
         "Capital Weight": weights,
         "Target Risk Contribution": target_rc,
         "Actual Risk Contribution": actual_rc
     })
+
+    # Optional covariance and optimization diagnostics.
+    if return_diagnostics:
+
+        diagnostics = {
+            "raw_covariance": pd.DataFrame(
+                raw_cov,
+                index=asset_cols,
+                columns=asset_cols
+            ),
+            "normalized_covariance": pd.DataFrame(
+                cov,
+                index=asset_cols,
+                columns=asset_cols
+            ),
+            "covariance_scale": scale,
+            "observations": len(asset_returns),
+            "objective_value": float(best.fun),
+            "iterations": int(best.nit)
+        }
+
+        return result_df, diagnostics
+
+    return result_df
 
 
 # ROLLING QUARTERLY OPTIMIZATION
